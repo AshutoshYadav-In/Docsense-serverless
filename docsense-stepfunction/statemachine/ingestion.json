@@ -1,5 +1,5 @@
 {
-  "Comment": "DocSense — document ingestion (Express). Payload keys use snake_case between states.",
+  "Comment": "DocSense — document ingestion (Standard workflow). Payload keys use snake_case between states.",
   "StartAt": "ExtractAndChunk",
   "States": {
     "ExtractAndChunk": {

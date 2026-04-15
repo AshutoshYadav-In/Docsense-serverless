@@ -65,7 +65,8 @@ functions:
 stepFunctions:
   stateMachines:
     DocSenseIngestion:
-      type: EXPRESS
+      # STANDARD: full execution history + Map iteration I/O in the console (Express does not).
+      type: STANDARD
       name: DocSenseIngestion
       role:
         Fn::GetAtt:
@@ -73,7 +74,8 @@ stepFunctions:
           - Arn
       loggingConfig:
         level: ALL
-        includeExecutionData: false
+        # Required for execution input/output in CloudWatch log deliveries (large / sensitive payloads: review retention).
+        includeExecutionData: true
         destinations:
           - Fn::GetAtt:
               - DocSenseIngestionLogGroup
