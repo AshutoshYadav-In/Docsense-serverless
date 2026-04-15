@@ -11,8 +11,14 @@ const {
 } = require("../utils/s3Ingestion");
 
 const WORDS_PER_CHUNK = 500;
+/** Words repeated from the end of the previous chunk so context is not cut at boundaries. */
+const OVERLAP_WORDS = 75;
 
-function chunkTextByWords(text, wordsPerChunk) {
+/**
+ * Sliding windows of `wordsPerChunk` words, advancing by `wordsPerChunk - overlapWords`
+ * so each boundary carries `overlapWords` from the prior chunk and the rest is new text.
+ */
+function chunkTextByWordsWithOverlap(text, wordsPerChunk, overlapWords) {
   const words = String(text || "")
     .trim()
     .split(/\s+/)
@@ -20,9 +26,19 @@ function chunkTextByWords(text, wordsPerChunk) {
   if (words.length === 0) {
     return [];
   }
+  const stride = wordsPerChunk - overlapWords;
+  if (stride <= 0) {
+    throw new Error("overlap must be less than wordsPerChunk");
+  }
   const chunks = [];
-  for (let i = 0; i < words.length; i += wordsPerChunk) {
-    chunks.push(words.slice(i, i + wordsPerChunk).join(" "));
+  let start = 0;
+  while (start < words.length) {
+    const end = Math.min(start + wordsPerChunk, words.length);
+    chunks.push(words.slice(start, end).join(" "));
+    if (end === words.length) {
+      break;
+    }
+    start += stride;
   }
   return chunks;
 }
@@ -47,7 +63,11 @@ async function handler(event) {
   const buffer = Buffer.from(await get.Body.transformToByteArray());
   const parsed = await pdfParse(buffer);
   const text = parsed.text || "";
-  const chunks = chunkTextByWords(text, WORDS_PER_CHUNK);
+  const chunks = chunkTextByWordsWithOverlap(
+    text,
+    WORDS_PER_CHUNK,
+    OVERLAP_WORDS
+  );
   const reference_id = event.reference_id;
   const file_name = event.file_name ?? event.original_filename;
   const bucket = event.bucket;

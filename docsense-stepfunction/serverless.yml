@@ -49,7 +49,7 @@ package:
 functions:
   extractAndChunk:
     handler: functions/extractAndChunk/index.handler
-    description: Download PDF from S3, extract text, chunk to 500 words
+    description: Download PDF from S3, extract text, chunk to 500 words with 75-word overlap
 
   embedChunk:
     handler: functions/embedChunk/index.handler
