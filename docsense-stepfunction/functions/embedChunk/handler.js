@@ -8,13 +8,15 @@ const { getClientCredentials } = require("../utils/clientCredentials");
 const { joinUrl, formatAxiosError } = require("../utils/javaApi");
 const { batchFileKey } = require("../utils/s3Ingestion");
 
-const REQUEST_MS = 55000;
-const EMBED_CONCURRENCY = 5;
+/** Must match com.project.ashutosh.dto.EmbedBatchRequest.MAX_TEXTS_PER_REQUEST */
+const MAX_TEXTS_PER_REQUEST = 10;
+
+const REQUEST_MS = 120000;
 
 /**
- * Map iterator — processes an entire batch (up to 25 chunks).
- * Reads batch file, embeds each entry via Java API, writes back with embeddings.
- * Returns { batch_index } only.
+ * Map iterator — processes one batch file (up to 25 chunks).
+ * Calls Java bulk embed API with up to 10 texts per HTTP request (same keys in response).
+ * Writes batch file back with embeddings filled in.
  */
 async function handler(event) {
   const baseUrl = process.env.JAVA_API_BASE_URL;
@@ -43,17 +45,25 @@ async function handler(event) {
   const { clientId, clientToken } = await getClientCredentials();
   const url = joinUrl(baseUrl, "/api/internal/embed");
 
-  async function embedOne(entry, localIdx) {
-    const text = entry.text == null ? "" : String(entry.text).trim();
-    if (!text) {
-      throw new Error(
-        `embedBatch: blank text at batch ${batch_index} index ${localIdx}`
-      );
+  for (let start = 0; start < entries.length; start += MAX_TEXTS_PER_REQUEST) {
+    const end = Math.min(start + MAX_TEXTS_PER_REQUEST, entries.length);
+    /** @type {Record<string, string>} */
+    const texts = {};
+    for (let i = start; i < end; i++) {
+      const t = entries[i].text == null ? "" : String(entries[i].text).trim();
+      if (!t) {
+        throw new Error(
+          `embedBatch: blank text at batch ${batch_index} index ${i}`
+        );
+      }
+      texts[String(i)] = t;
     }
+
+    let data;
     try {
-      const { data } = await axios.post(
+      const res = await axios.post(
         url,
-        { chunk_text: text },
+        { texts },
         {
           timeout: REQUEST_MS,
           headers: {
@@ -64,26 +74,31 @@ async function handler(event) {
           validateStatus: (s) => s >= 200 && s < 300,
         }
       );
-      const embedding = data?.embedding;
-      if (embedding == null) {
-        throw new Error(
-          `embedBatch: no embedding in response for batch ${batch_index} index ${localIdx}`
-        );
-      }
-      entry.embedding = embedding;
+      data = res.data;
     } catch (err) {
       if (axios.isAxiosError(err)) {
         throw formatAxiosError(err);
       }
       throw err;
     }
-  }
 
-  for (let i = 0; i < entries.length; i += EMBED_CONCURRENCY) {
-    const slice = entries.slice(i, i + EMBED_CONCURRENCY);
-    await Promise.all(
-      slice.map((entry, offset) => embedOne(entry, i + offset))
-    );
+    const embeddings = data?.embeddings;
+    if (embeddings == null || typeof embeddings !== "object") {
+      throw new Error(
+        "embedBatch: response missing embeddings map (expected EmbedBatchResponse)"
+      );
+    }
+
+    for (let i = start; i < end; i++) {
+      const keyStr = String(i);
+      const embedding = embeddings[keyStr];
+      if (embedding == null) {
+        throw new Error(
+          `embedBatch: missing embedding for key "${keyStr}" in batch ${batch_index}`
+        );
+      }
+      entries[i].embedding = embedding;
+    }
   }
 
   await s3.send(
