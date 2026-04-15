@@ -6,7 +6,7 @@ const {
 const pdfParse = require("pdf-parse");
 const {
   BATCH_SIZE,
-  batchesPrefix,
+  resolveBatchesPrefix,
   batchFileKey,
 } = require("../utils/s3Ingestion");
 
@@ -28,8 +28,10 @@ function chunkTextByWords(text, wordsPerChunk) {
 }
 
 /**
- * Input (snake_case): reference_id, original_filename, s3_key, bucket
- * Writes batch files (text + embedding:null) under batches/; returns tiny metadata.
+ * Input (snake_case): reference_id, bucket, s3_key, file_name (or original_filename),
+ * optional folder_name (workspace key prefix, e.g. tenants/{tid}/{reference_id}/ — batches/ appended),
+ *   ignored for path if it is only a short id with no slashes; then s3_folder_prefix or derivation applies,
+ * optional s3_folder_prefix (same role as a full-path folder_name when folder_name is not a key prefix).
  */
 async function handler(event) {
   const region = process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION;
@@ -47,10 +49,10 @@ async function handler(event) {
   const text = parsed.text || "";
   const chunks = chunkTextByWords(text, WORDS_PER_CHUNK);
   const reference_id = event.reference_id;
-  const file_name = event.original_filename;
+  const file_name = event.file_name ?? event.original_filename;
   const bucket = event.bucket;
 
-  const bp = batchesPrefix(event.s3_key, reference_id);
+  const bp = resolveBatchesPrefix(event);
   const chunk_count = chunks.length;
   const batch_count =
     chunk_count === 0 ? 0 : Math.ceil(chunk_count / BATCH_SIZE);
@@ -72,7 +74,6 @@ async function handler(event) {
   }
   await Promise.all(uploads);
 
-  // ~120 bytes per item — 40 batches (1000 chunks) ≈ 5 KB. Safe.
   const batch_indices = Array.from({ length: batch_count }, (_, i) => ({
     batch_index: i,
     reference_id,
