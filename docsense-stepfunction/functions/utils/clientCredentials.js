@@ -6,13 +6,10 @@
  * SSM calls (important for embedChunk, which runs once per chunk in the Map state).
  */
 
-const {
-  SSMClient,
-  GetParameterCommand,
-} = require("@aws-sdk/client-ssm");
+const { SSMClient, GetParameterCommand } = require("@aws-sdk/client-ssm");
 
-const PARAM_CLIENT_ID = "/x-client-id";
-const PARAM_CLIENT_TOKEN = "/x-client-token";
+const PARAM_CLIENT_ID = "/docsense-client-id";
+const PARAM_CLIENT_TOKEN = "/docsense-client-token";
 
 let cachedPromise = null;
 

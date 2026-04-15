@@ -1,23 +1,48 @@
+const axios = require("axios");
 const { getClientCredentials } = require("../utils/clientCredentials");
+const { joinUrl, formatAxiosError } = require("../utils/javaApi");
+
+const REQUEST_MS = 55000;
 
 /**
- * embedChunk (Map iterator target)
- *
- * Per-iteration input (from Map ItemSelector):
- *   chunkText, referenceId, fileName
- *
- * Will implement:
- * - const { clientId, clientToken } = await getClientCredentials();
- * - POST `${process.env.JAVA_API_BASE_URL}/internal/embed` (JAVA_API_BASE_URL is set only on this Lambda)
- * - Headers: { "X-Client-Id": clientId, "X-Client-Token": clientToken }
- * - Body: { chunkText }
- *
- * Return the Java response body for the step output (e.g. chunkText + embedding array)
- * so BulkInsertAndComplete can build chunksWithEmbeddings.
+ * Map iterator — input: { chunkText, referenceId, fileName }
+ * POST /internal/embed → { chunkText, embedding }
  */
 async function handler(event) {
-  await getClientCredentials(); // warm cache; remove if you fetch inline before axios
-  throw new Error("embedChunk: not implemented");
+  const baseUrl = process.env.JAVA_API_BASE_URL;
+  if (!baseUrl) {
+    throw new Error("JAVA_API_BASE_URL is not set on this Lambda");
+  }
+
+  const chunkText = event?.chunkText;
+  if (chunkText == null || chunkText === "") {
+    throw new Error("embedChunk: missing chunkText");
+  }
+
+  const { clientId, clientToken } = await getClientCredentials();
+  const url = joinUrl(baseUrl, "/internal/embed");
+
+  try {
+    const { data } = await axios.post(
+      url,
+      { chunkText },
+      {
+        timeout: REQUEST_MS,
+        headers: {
+          "Content-Type": "application/json",
+          "X-Client-Id": clientId,
+          "X-Client-Token": clientToken,
+        },
+        validateStatus: (s) => s >= 200 && s < 300,
+      }
+    );
+    return data;
+  } catch (err) {
+    if (axios.isAxiosError(err)) {
+      throw formatAxiosError(err);
+    }
+    throw err;
+  }
 }
 
 module.exports = { handler };
