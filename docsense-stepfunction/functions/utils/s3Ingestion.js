@@ -1,14 +1,14 @@
 /**
- * S3 keys for ingestion artifacts.
+ * S3 keys for ingestion artifacts — unified batches folder.
  *
- * Chunk batches : tenants/{tenantId}/{reference_id}/chunk-batches/{n}.json
- * Embedding parts: tenants/{tenantId}/{reference_id}/embeddings/{i}.json
- * Manifest       : ingestion-meta/{reference_id}.json  (deterministic from reference_id alone)
+ * Layout: tenants/{tenantId}/{reference_id}/batches/{batch_index}.json
+ * Fallback (no tenants/ prefix): ingestion/{reference_id}/batches/{batch_index}.json
  *
- * Fallback (no tenants/ prefix): ingestion/{reference_id}/...
+ * Each batch file is an array of { text, embedding } objects (25 per file).
+ * Extract writes with embedding: null; embed Lambda fills in embeddings.
  */
 
-const CHUNKS_BATCH_SIZE = 25;
+const BATCH_SIZE = 25;
 
 function ingestionBaseKey(s3_key, reference_id) {
   const parts = String(s3_key || "")
@@ -21,33 +21,17 @@ function ingestionBaseKey(s3_key, reference_id) {
   return `ingestion/${reference_id}`;
 }
 
-/** Manifest key derivable from reference_id alone (embed Lambda uses this). */
-function manifestKey(reference_id) {
-  return `ingestion-meta/${reference_id}.json`;
+function batchesPrefix(s3_key, reference_id) {
+  return `${ingestionBaseKey(s3_key, reference_id)}/batches/`;
 }
 
-function chunkBatchesPrefix(s3_key, reference_id) {
-  return `${ingestionBaseKey(s3_key, reference_id)}/chunk-batches/`;
-}
-
-function chunkBatchFileKey(chunk_batches_prefix, batch_index) {
-  return `${chunk_batches_prefix}${batch_index}.json`;
-}
-
-function embeddingsPartsPrefix(s3_key, reference_id) {
-  return `${ingestionBaseKey(s3_key, reference_id)}/embeddings/`;
-}
-
-function embeddingPartKey(embeddings_parts_prefix, chunk_index) {
-  return `${embeddings_parts_prefix}${chunk_index}.json`;
+function batchFileKey(batches_prefix, batch_index) {
+  return `${batches_prefix}${batch_index}.json`;
 }
 
 module.exports = {
-  CHUNKS_BATCH_SIZE,
+  BATCH_SIZE,
   ingestionBaseKey,
-  manifestKey,
-  chunkBatchesPrefix,
-  chunkBatchFileKey,
-  embeddingsPartsPrefix,
-  embeddingPartKey,
+  batchesPrefix,
+  batchFileKey,
 };

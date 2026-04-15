@@ -53,7 +53,9 @@ functions:
 
   embedChunk:
     handler: functions/embedChunk/index.handler
-    description: POST chunk to Java /api/internal/embed (Map iterator)
+    description: Embed all chunks in one batch file (Map per-batch iterator)
+    timeout: 300
+    memorySize: 1024
     environment:
       JAVA_API_BASE_URL: ${env:JAVA_API_BASE_URL}
 

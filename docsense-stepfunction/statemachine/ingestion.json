@@ -4,7 +4,7 @@
   "States": {
     "ExtractAndChunk": {
       "Type": "Task",
-      "Comment": "Output: chunk_batches_prefix + chunks_batch_size; text in chunk-batches/{n}.json",
+      "Comment": "Writes batch files (text + embedding:null) under batches/; returns batch_indices",
       "Resource": {
         "Fn::GetAtt": [
           "ExtractAndChunkLambdaFunction",
@@ -39,22 +39,22 @@
     },
     "GenerateEmbeddings": {
       "Type": "Map",
-      "Comment": "No ItemSelector — each item already carries S3 metadata (avoids Fn::Sub $$ escaping issues)",
-      "ItemsPath": "$.chunk_indices",
+      "Comment": "Iterates per batch (not per chunk). Each item carries batch_index + S3 metadata.",
+      "ItemsPath": "$.batch_indices",
       "MaxConcurrency": 10,
       "Iterator": {
-        "StartAt": "InvokeEmbedChunk",
+        "StartAt": "InvokeEmbedBatch",
         "States": {
-          "InvokeEmbedChunk": {
+          "InvokeEmbedBatch": {
             "Type": "Task",
-            "Comment": "Load chunk from S3, embed, write part file; output { chunk_index } only",
+            "Comment": "Embeds all entries in one batch file; writes back with embeddings",
             "Resource": {
               "Fn::GetAtt": [
                 "EmbedChunkLambdaFunction",
                 "Arn"
               ]
             },
-            "TimeoutSeconds": 60,
+            "TimeoutSeconds": 300,
             "End": true,
             "Retry": [
               {
@@ -64,7 +64,7 @@
                   "Lambda.SdkClientException",
                   "Lambda.TooManyRequestsException"
                 ],
-                "IntervalSeconds": 1,
+                "IntervalSeconds": 2,
                 "MaxAttempts": 3,
                 "BackoffRate": 2
               }
@@ -72,7 +72,7 @@
           }
         }
       },
-      "ResultPath": "$.embeddings_result",
+      "ResultPath": "$.embed_results",
       "Next": "BulkInsertAndComplete",
       "Catch": [
         {
@@ -86,7 +86,7 @@
     },
     "BulkInsertAndComplete": {
       "Type": "Task",
-      "Comment": "Reads embedding parts from S3; Parameters omit large arrays",
+      "Comment": "Reads batch files from S3 (text + embeddings); POSTs to Java bulk-insert",
       "Resource": {
         "Fn::GetAtt": [
           "BulkInsertAndCompleteLambdaFunction",
@@ -97,10 +97,11 @@
         "reference_id.$": "$.reference_id",
         "file_name.$": "$.file_name",
         "bucket.$": "$.bucket",
-        "embeddings_parts_prefix.$": "$.embeddings_parts_prefix",
-        "chunk_count.$": "$.chunk_count"
+        "batches_prefix.$": "$.batches_prefix",
+        "chunk_count.$": "$.chunk_count",
+        "batch_count.$": "$.batch_count"
       },
-      "TimeoutSeconds": 120,
+      "TimeoutSeconds": 300,
       "Next": "IngestionComplete",
       "Retry": [
         {

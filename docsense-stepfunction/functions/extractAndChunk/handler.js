@@ -5,11 +5,9 @@ const {
 } = require("@aws-sdk/client-s3");
 const pdfParse = require("pdf-parse");
 const {
-  CHUNKS_BATCH_SIZE,
-  manifestKey,
-  chunkBatchesPrefix,
-  chunkBatchFileKey,
-  embeddingsPartsPrefix,
+  BATCH_SIZE,
+  batchesPrefix,
+  batchFileKey,
 } = require("../utils/s3Ingestion");
 
 const WORDS_PER_CHUNK = 500;
@@ -31,7 +29,7 @@ function chunkTextByWords(text, wordsPerChunk) {
 
 /**
  * Input (snake_case): reference_id, original_filename, s3_key, bucket
- * Writes chunk batches + manifest to S3; returns tiny metadata for Step Functions.
+ * Writes batch files (text + embedding:null) under batches/; returns tiny metadata.
  */
 async function handler(event) {
   const region = process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION;
@@ -52,64 +50,44 @@ async function handler(event) {
   const file_name = event.original_filename;
   const bucket = event.bucket;
 
-  const cbPrefix = chunkBatchesPrefix(event.s3_key, reference_id);
-  const epPrefix = embeddingsPartsPrefix(event.s3_key, reference_id);
-  const mKey = manifestKey(reference_id);
-
+  const bp = batchesPrefix(event.s3_key, reference_id);
   const chunk_count = chunks.length;
-  const batchCount =
-    chunk_count === 0 ? 0 : Math.ceil(chunk_count / CHUNKS_BATCH_SIZE);
+  const batch_count =
+    chunk_count === 0 ? 0 : Math.ceil(chunk_count / BATCH_SIZE);
 
   const uploads = [];
-  for (let b = 0; b < batchCount; b++) {
-    const slice = chunks.slice(
-      b * CHUNKS_BATCH_SIZE,
-      (b + 1) * CHUNKS_BATCH_SIZE
-    );
+  for (let b = 0; b < batch_count; b++) {
+    const slice = chunks.slice(b * BATCH_SIZE, (b + 1) * BATCH_SIZE);
+    const entries = slice.map((t) => ({ text: t, embedding: null }));
     uploads.push(
       s3.send(
         new PutObjectCommand({
           Bucket: bucket,
-          Key: chunkBatchFileKey(cbPrefix, b),
-          Body: JSON.stringify({ chunks: slice }),
+          Key: batchFileKey(bp, b),
+          Body: JSON.stringify(entries),
           ContentType: "application/json",
         })
       )
     );
   }
-
-  uploads.push(
-    s3.send(
-      new PutObjectCommand({
-        Bucket: bucket,
-        Key: mKey,
-        Body: JSON.stringify({
-          chunk_batches_prefix: cbPrefix,
-          chunks_batch_size: CHUNKS_BATCH_SIZE,
-          embeddings_parts_prefix: epPrefix,
-        }),
-        ContentType: "application/json",
-      })
-    )
-  );
-
   await Promise.all(uploads);
 
-  // Each item ~110 bytes (chunk_index + reference_id UUID + bucket name).
-  // Supports ~2300 chunks before approaching 256 KB.
-  const chunk_indices = Array.from({ length: chunk_count }, (_, i) => ({
-    chunk_index: i,
+  // ~120 bytes per item — 40 batches (1000 chunks) ≈ 5 KB. Safe.
+  const batch_indices = Array.from({ length: batch_count }, (_, i) => ({
+    batch_index: i,
     reference_id,
     bucket,
+    batches_prefix: bp,
   }));
 
   return {
     reference_id,
     file_name,
     bucket,
-    embeddings_parts_prefix: epPrefix,
+    batches_prefix: bp,
     chunk_count,
-    chunk_indices,
+    batch_count,
+    batch_indices,
   };
 }
 
