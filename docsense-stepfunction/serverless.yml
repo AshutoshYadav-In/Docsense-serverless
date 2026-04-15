@@ -3,7 +3,18 @@ service: docsense-ingestion
 frameworkVersion: "3"
 
 plugins:
+  - serverless-esbuild
   - serverless-step-functions
+
+custom:
+  esbuild:
+    bundle: true
+    minify: true
+    target: node20
+    platform: node
+    sourcemap: false
+    # Per-function bundle: extract only pulls s3+pdf-parse; embed/bulk skip pdf-parse (~largest dep)
+    packages: bundle
 
 provider:
   name: aws
@@ -11,11 +22,6 @@ provider:
   region: ${env:AWS_REGION}
   memorySize: 512
   timeout: 60
-  individually: true
-  excludeDevDependencies: true
-
-  environment:
-    S3_BUCKET: ${env:S3_BUCKET}
 
   iam:
     role:
@@ -24,13 +30,13 @@ provider:
           Action:
             - s3:GetObject
           Resource:
-            - arn:aws:s3:::${env:S3_BUCKET}/*
+            - arn:aws:s3:::*/*
         - Effect: Allow
           Action:
             - ssm:GetParameter
           Resource:
-            - arn:aws:ssm:${aws:region}:${aws:accountId}:parameter/x-client-id
-            - arn:aws:ssm:${aws:region}:${aws:accountId}:parameter/x-client-token
+            - arn:aws:ssm:${aws:region}:${aws:accountId}:parameter/docsense-client-id
+            - arn:aws:ssm:${aws:region}:${aws:accountId}:parameter/docsense-client-token
         - Effect: Allow
           Action:
             - kms:Decrypt
@@ -38,9 +44,6 @@ provider:
 
 package:
   individually: true
-  patterns:
-    - "functions/**"
-    - "!**/*.test.js"
 
 functions:
   extractAndChunk:
@@ -49,13 +52,13 @@ functions:
 
   embedChunk:
     handler: functions/embedChunk/index.handler
-    description: POST chunk to Java /internal/embed (Map iterator)
+    description: POST chunk to Java /api/internal/embed (Map iterator)
     environment:
       JAVA_API_BASE_URL: ${env:JAVA_API_BASE_URL}
 
   bulkInsertAndComplete:
     handler: functions/bulkInsertAndComplete/index.handler
-    description: POST bulk vectors to Java /internal/bulk-insert
+    description: POST bulk vectors to Java /api/internal/bulk-insert
     environment:
       JAVA_API_BASE_URL: ${env:JAVA_API_BASE_URL}
 

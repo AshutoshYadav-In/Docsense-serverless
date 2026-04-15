@@ -2,7 +2,7 @@ const axios = require("axios");
 
 /**
  * @param {string} baseUrl - JAVA_API_BASE_URL (no trailing slash required)
- * @param {string} path - e.g. "/internal/embed"
+ * @param {string} path - e.g. "/api/internal/embed"
  */
 function joinUrl(baseUrl, path) {
   const base = String(baseUrl || "").replace(/\/+$/, "");

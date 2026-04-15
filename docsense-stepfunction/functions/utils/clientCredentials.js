@@ -1,6 +1,6 @@
 /**
  * Loads DocSense API auth from SSM Parameter Store at runtime (not via serverless env).
- * Parameters: /x-client-id and /x-client-token (SecureString for token is typical).
+ * Parameters: /docsense-client-id and /docsense-client-token (SecureString for token is typical).
  *
  * Results are cached for the lifetime of the Lambda container to avoid repeated
  * SSM calls (important for embedChunk, which runs once per chunk in the Map state).
@@ -47,7 +47,7 @@ async function fetchFromSsm() {
 
   if (clientId == null || clientToken == null) {
     throw new Error(
-      "SSM parameters /x-client-id and /x-client-token must return values"
+      "SSM parameters /docsense-client-id and /docsense-client-token must return values"
     );
   }
 

@@ -5,8 +5,8 @@ const { joinUrl, formatAxiosError } = require("../utils/javaApi");
 const REQUEST_MS = 55000;
 
 /**
- * Map iterator — input: { chunkText, referenceId, fileName }
- * POST /internal/embed → { chunkText, embedding }
+ * Map iterator — event: chunk_text, reference_id, file_name (snake_case).
+ * Backend JSON uses snake_case (Jackson).
  */
 async function handler(event) {
   const baseUrl = process.env.JAVA_API_BASE_URL;
@@ -14,18 +14,19 @@ async function handler(event) {
     throw new Error("JAVA_API_BASE_URL is not set on this Lambda");
   }
 
-  const chunkText = event?.chunkText;
-  if (chunkText == null || chunkText === "") {
-    throw new Error("embedChunk: missing chunkText");
+  const chunk_text = event?.chunk_text;
+  const text = chunk_text == null ? "" : String(chunk_text).trim();
+  if (!text) {
+    throw new Error("embedChunk: missing chunk_text");
   }
 
   const { clientId, clientToken } = await getClientCredentials();
-  const url = joinUrl(baseUrl, "/internal/embed");
+  const url = joinUrl(baseUrl, "/api/internal/embed");
 
   try {
     const { data } = await axios.post(
       url,
-      { chunkText },
+      { chunk_text: text },
       {
         timeout: REQUEST_MS,
         headers: {
@@ -36,7 +37,7 @@ async function handler(event) {
         validateStatus: (s) => s >= 200 && s < 300,
       }
     );
-    return data;
+    return { ...data, chunk_text: text };
   } catch (err) {
     if (axios.isAxiosError(err)) {
       throw formatAxiosError(err);
