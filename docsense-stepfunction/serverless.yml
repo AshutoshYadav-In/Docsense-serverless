@@ -11,6 +11,8 @@ provider:
   region: ${env:AWS_REGION}
   memorySize: 512
   timeout: 60
+  individually: true
+  excludeDevDependencies: true
 
   environment:
     S3_BUCKET: ${env:S3_BUCKET}
