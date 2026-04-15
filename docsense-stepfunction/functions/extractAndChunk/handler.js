@@ -10,9 +10,9 @@ const {
   batchFileKey,
 } = require("../utils/s3Ingestion");
 
-const WORDS_PER_CHUNK = 500;
+const WORDS_PER_CHUNK = 200;
 /** Words repeated from the end of the previous chunk so context is not cut at boundaries. */
-const OVERLAP_WORDS = 75;
+const OVERLAP_WORDS = 40;
 
 /**
  * Sliding windows of `wordsPerChunk` words, advancing by `wordsPerChunk - overlapWords`
