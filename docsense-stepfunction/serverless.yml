@@ -29,6 +29,7 @@ provider:
         - Effect: Allow
           Action:
             - s3:GetObject
+            - s3:PutObject
           Resource:
             - arn:aws:s3:::*/*
         - Effect: Allow
@@ -58,7 +59,9 @@ functions:
 
   bulkInsertAndComplete:
     handler: functions/bulkInsertAndComplete/index.handler
-    description: POST bulk vectors to Java /api/internal/bulk-insert
+    description: POST bulk vectors to Java /api/internal/bulk-insert (loads parts from S3)
+    timeout: 300
+    memorySize: 1024
     environment:
       JAVA_API_BASE_URL: ${env:JAVA_API_BASE_URL}
 

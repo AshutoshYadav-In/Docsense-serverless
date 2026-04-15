@@ -4,7 +4,7 @@
   "States": {
     "ExtractAndChunk": {
       "Type": "Task",
-      "Comment": "Output: reference_id, file_name, chunk_items (for Map)",
+      "Comment": "Output: chunk_batches_prefix + chunks_batch_size; text in chunk-batches/{n}.json",
       "Resource": {
         "Fn::GetAtt": [
           "ExtractAndChunkLambdaFunction",
@@ -39,15 +39,15 @@
     },
     "GenerateEmbeddings": {
       "Type": "Map",
-      "Comment": "ItemsPath: chunk_items (one object per chunk with chunk_text, reference_id, file_name). No ItemSelector — avoids Fn::Sub eating $$ in $$.Map.Item.Value.",
-      "ItemsPath": "$.chunk_items",
+      "Comment": "No ItemSelector — each item already carries S3 metadata (avoids Fn::Sub $$ escaping issues)",
+      "ItemsPath": "$.chunk_indices",
       "MaxConcurrency": 10,
       "Iterator": {
         "StartAt": "InvokeEmbedChunk",
         "States": {
           "InvokeEmbedChunk": {
             "Type": "Task",
-            "Comment": "Lambda maps chunk_text to Java body { chunkText }",
+            "Comment": "Load chunk from S3, embed, write part file; output { chunk_index } only",
             "Resource": {
               "Fn::GetAtt": [
                 "EmbedChunkLambdaFunction",
@@ -86,7 +86,7 @@
     },
     "BulkInsertAndComplete": {
       "Type": "Task",
-      "Comment": "Parameters: reference_id, file_name, embeddings_result",
+      "Comment": "Reads embedding parts from S3; Parameters omit large arrays",
       "Resource": {
         "Fn::GetAtt": [
           "BulkInsertAndCompleteLambdaFunction",
@@ -96,7 +96,9 @@
       "Parameters": {
         "reference_id.$": "$.reference_id",
         "file_name.$": "$.file_name",
-        "embeddings_result.$": "$.embeddings_result"
+        "bucket.$": "$.bucket",
+        "embeddings_parts_prefix.$": "$.embeddings_parts_prefix",
+        "chunk_count.$": "$.chunk_count"
       },
       "TimeoutSeconds": 120,
       "Next": "IngestionComplete",
