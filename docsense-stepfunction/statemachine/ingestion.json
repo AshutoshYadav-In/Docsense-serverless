@@ -1,0 +1,143 @@
+{
+  "Comment": "DocSense — document ingestion (Express). Flow: extract PDF text + chunk → Map embeddings (max 10 parallel) → bulk insert to vector store. Spring passes execution input; output is the bulk-insert Lambda result on success.",
+  "StartAt": "ExtractAndChunk",
+  "States": {
+    "ExtractAndChunk": {
+      "Type": "Task",
+      "Comment": "Lambda: S3 GetObject → pdf-parse → 500-word chunks. Output { referenceId, fileName, chunks[] }.",
+      "Resource": {
+        "Fn::GetAtt": [
+          "ExtractAndChunkLambdaFunction",
+          "Arn"
+        ]
+      },
+      "TimeoutSeconds": 120,
+      "ResultPath": "$",
+      "Next": "GenerateEmbeddings",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "IngestionFailed",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+    "GenerateEmbeddings": {
+      "Type": "Map",
+      "Comment": "One Lambda invocation per chunk; ItemSelector carries referenceId + fileName; ResultPath merges embedding array onto state as embeddingsResult.",
+      "ItemsPath": "$.chunks",
+      "MaxConcurrency": 10,
+      "ItemSelector": {
+        "chunkText.$": "$$.Map.Item.Value",
+        "referenceId.$": "$.referenceId",
+        "fileName.$": "$.fileName"
+      },
+      "Iterator": {
+        "StartAt": "InvokeEmbedChunk",
+        "States": {
+          "InvokeEmbedChunk": {
+            "Type": "Task",
+            "Comment": "Lambda: POST /internal/embed with { chunkText } and X-Client-Id / X-Client-Token.",
+            "Resource": {
+              "Fn::GetAtt": [
+                "EmbedChunkLambdaFunction",
+                "Arn"
+              ]
+            },
+            "TimeoutSeconds": 60,
+            "End": true,
+            "Retry": [
+              {
+                "ErrorEquals": [
+                  "Lambda.ServiceException",
+                  "Lambda.AWSLambdaException",
+                  "Lambda.SdkClientException",
+                  "Lambda.TooManyRequestsException"
+                ],
+                "IntervalSeconds": 1,
+                "MaxAttempts": 3,
+                "BackoffRate": 2
+              }
+            ]
+          }
+        }
+      },
+      "ResultPath": "$.embeddingsResult",
+      "Next": "BulkInsertAndComplete",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "IngestionFailed",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+    "BulkInsertAndComplete": {
+      "Type": "Task",
+      "Comment": "Lambda: POST /internal/bulk-insert with referenceId, fileName, chunksWithEmbeddings built from embeddingsResult.",
+      "Resource": {
+        "Fn::GetAtt": [
+          "BulkInsertAndCompleteLambdaFunction",
+          "Arn"
+        ]
+      },
+      "Parameters": {
+        "referenceId.$": "$.referenceId",
+        "fileName.$": "$.fileName",
+        "embeddingsResult.$": "$.embeddingsResult"
+      },
+      "TimeoutSeconds": 120,
+      "Next": "IngestionComplete",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 2,
+          "BackoffRate": 2
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "IngestionFailed",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+    "IngestionComplete": {
+      "Type": "Succeed",
+      "Comment": "Successful end; execution output is the bulk-insert Lambda response (e.g. status, referenceId, indexedCount, indexName).",
+      "OutputPath": "$"
+    },
+    "IngestionFailed": {
+      "Type": "Fail",
+      "Comment": "No Java callback — Spring uses DescribeExecution + execution input (referenceId) to correlate failures.",
+      "Error": "DocSense.IngestionFailed",
+      "Cause": "Ingestion pipeline failed — see execution history / Map or Task output for details."
+    }
+  }
+}

@@ -1,0 +1,129 @@
+service: docsense-ingestion
+
+frameworkVersion: "3"
+
+plugins:
+  - serverless-step-functions
+
+provider:
+  name: aws
+  runtime: nodejs20.x
+  region: ${env:AWS_REGION}
+  memorySize: 512
+  timeout: 60
+
+  environment:
+    S3_BUCKET: ${env:S3_BUCKET}
+
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action:
+            - s3:GetObject
+          Resource:
+            - arn:aws:s3:::${env:S3_BUCKET}/*
+        - Effect: Allow
+          Action:
+            - ssm:GetParameter
+          Resource:
+            - arn:aws:ssm:${aws:region}:${aws:accountId}:parameter/x-client-id
+            - arn:aws:ssm:${aws:region}:${aws:accountId}:parameter/x-client-token
+        - Effect: Allow
+          Action:
+            - kms:Decrypt
+          Resource: arn:aws:kms:${aws:region}:${aws:accountId}:alias/aws/ssm
+
+package:
+  individually: true
+  patterns:
+    - "functions/**"
+    - "!**/*.test.js"
+
+functions:
+  extractAndChunk:
+    handler: functions/extractAndChunk/index.handler
+    description: Download PDF from S3, extract text, chunk to 500 words
+
+  embedChunk:
+    handler: functions/embedChunk/index.handler
+    description: POST chunk to Java /internal/embed (Map iterator)
+    environment:
+      JAVA_API_BASE_URL: ${env:JAVA_API_BASE_URL}
+
+  bulkInsertAndComplete:
+    handler: functions/bulkInsertAndComplete/index.handler
+    description: POST bulk vectors to Java /internal/bulk-insert
+    environment:
+      JAVA_API_BASE_URL: ${env:JAVA_API_BASE_URL}
+
+stepFunctions:
+  stateMachines:
+    DocSenseIngestion:
+      type: EXPRESS
+      name: DocSenseIngestion
+      role:
+        Fn::GetAtt:
+          - DocSenseIngestionRole
+          - Arn
+      loggingConfig:
+        level: ALL
+        includeExecutionData: false
+        destinations:
+          - Fn::GetAtt:
+              - DocSenseIngestionLogGroup
+              - Arn
+      definition: ${file(./statemachine/ingestion.json)}
+
+resources:
+  Resources:
+    DocSenseIngestionLogGroup:
+      Type: AWS::Logs::LogGroup
+      Properties:
+        LogGroupName: /aws/vendedlogs/states/docsense-ingestion
+        RetentionInDays: 30
+
+    DocSenseIngestionRole:
+      Type: AWS::IAM::Role
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service: states.amazonaws.com
+              Action: sts:AssumeRole
+        Policies:
+          - PolicyName: DocSenseIngestionInvokeLambdas
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - lambda:InvokeFunction
+                  Resource:
+                    - Fn::GetAtt:
+                        - ExtractAndChunkLambdaFunction
+                        - Arn
+                    - Fn::GetAtt:
+                        - EmbedChunkLambdaFunction
+                        - Arn
+                    - Fn::GetAtt:
+                        - BulkInsertAndCompleteLambdaFunction
+                        - Arn
+          - PolicyName: DocSenseIngestionLogsDelivery
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - logs:CreateLogDelivery
+                    - logs:GetLogDelivery
+                    - logs:UpdateLogDelivery
+                    - logs:DeleteLogDelivery
+                    - logs:ListLogDeliveries
+                    - logs:PutLogEvents
+                    - logs:PutResourcePolicy
+                    - logs:DescribeResourcePolicies
+                    - logs:DescribeLogGroups
+                  Resource: "*"
